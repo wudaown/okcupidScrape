@@ -1,9 +1,12 @@
 import requests
 import json
 import argparse
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
+# from concurrent.futures import as_completed
+# from ThreadPoolExecutor import ThreadPoolExecutorWithQueueSizeLimit
 from queue import Queue
 import threading
+import concurrent.futures.thread
 
 
 def readZip(zipPath):
@@ -11,7 +14,36 @@ def readZip(zipPath):
 	zipQueue = Queue()
 	for i in file:
 		zipQueue.put(i.split(",")[0][1:-1])
+	file.close()
 	return zipQueue
+
+# def readZipList(zipPath):
+# 	file = open(zipPath,'r')
+# 	zipList = []
+# 	for i in file:
+# 		zipList.append(i.split(",")[0][1:-1])
+# 	file.close
+# 	return zipList
+
+def readZipList(zipPath):
+	file = open(zipPath,'r')
+	zipList = []
+	for i in file:
+		zipList.append(i)
+	file.close()
+	return zipList
+
+def remainderZip(zipPath, qsize):
+	zipList = readZipList(zipPath)
+	file = open(zipPath,'w')
+	for i in range(qsize):
+		# print(i)
+		file.write(zipList[i])
+		# file.write("\n")
+	file.close()
+
+
+
 
 def locationQuery(zipCode):
 	locationUrl = 'https://www.okcupid.com/1/apitun/location/query?q='
@@ -58,8 +90,14 @@ def removeDup(filePath):
 	lines = open(filePath, 'r').readlines()
 	lines_set = set(lines)
 	out = open(filePath, 'w')
+	# fileLength = len(lines_set)
+	j = 0
 	for line in lines_set:
 		out.write(line)
+		# j += 1
+		# while j <= fileLength // 8:
+		# 	out.flush()
+		# 	j = 0
 	out.close()
 
 
@@ -79,7 +117,7 @@ def dataScrape(zipCode, filePath, lock,*p):
 			page = dataJson.json()['paging']['cursors']['after']
 		payload = newPayload(page,location,*p)
 		dataJson = r.post(searchUrl, data=json.dumps(payload),headers=headers)
-		# print(i, " ", dataJson)
+		print(i, " ", dataJson)
 		if dataJson.status_code == 200:
 			userData = dataJson.json()['data']
 			for usr in userData:
@@ -106,12 +144,21 @@ def dataScrape(zipCode, filePath, lock,*p):
 				# file.write("\n")
 	lock.acquire()
 	file = open(filePath,"a")
+	# fileLength = len(result)
+	j = 0
 	for i in result:
 		file.write(json.dumps(i))
 		file.write('\n')
+		file.flush()
+		# j += 1
+		# while j <= fileLength//8:
+		# 	file.flush()
+		# 	j = 0
 	file.close()
-	removeDup(filePath)
 	lock.release()
+
+	print("Done " + str(zipCode))
+
 
 def main():
 	parser = argparse.ArgumentParser()
@@ -130,33 +177,74 @@ def main():
 	lock = threading.Lock()
 
 	thread = []
-	zipQueue = readZip(args.z)
+	#zipQueue = readZip(args.z)
 	# while (not zipQueue.empty()):
 	# # for i in range(zipQueue.qsize()):
 	# 	t = threading.Thread(target=dataScrape, args=(zipQueue.get(),lock))
 	# 	thread.append(t)
 
+	zipList = readZipList(args.z)
+
 	les = (63,1,128,'other','other','white')
 	gay = (63,2,2,'other','other','white')
 	stw = (63,1,1,'other','other','white')
 	stm = (63,2,1,'other,','other','white')
-	# dataScrape(zipQueue.get(),lock,*stm)
-	pool = ThreadPoolExecutor(max_workers=5)
-	for i in range(1):
-		while (not zipQueue.empty()):
+	threadpool = []
+	pool = ThreadPoolExecutor(max_workers=2)
+	#pool = ThreadPoolExecutorWithQueueSizeLimit(max_workers=2, maxsize=2)
 
+	for i in range(1):
+		while len(zipList) != 0:
 			if args.o == 'gay':
 				filePath = 'gay.json'
-				pool.submit(dataScrape,zipQueue.get(), filePath, lock, *gay)
+				threadpool.append(pool.submit(dataScrape,zipList.pop().strip('\n'), filePath, lock, *gay))
 			elif args.o == 'les':
 				filePath = 'les.json'
-				pool.submit(dataScrape,zipQueue.get(), filePath, lock, *les)
+				threadpool.append(pool.submit(dataScrape,zipList.pop().strip('\n'), filePath, lock, *les))
 			elif args.o	== 'stw':
 				filePath = 'stw.json'
-				pool.submit(dataScrape,zipQueue.get(), filePath, lock, *stw)
+				threadpool.append(pool.submit(dataScrape,zipList.pop().strip('\n'), filePath, lock, *stw))
 			elif args.o == 'stm':
 				filePath = 'stm.json'
-				pool.submit(dataScrape,zipQueue.get(), filePath, lock, *stm)
+				threadpool.append(pool.submit(dataScrape,zipList.pop().strip('\n'), filePath, lock, *stm))
+
+	try:
+		for fp in as_completed(threadpool):
+			fp.result()
+	except KeyboardInterrupt:
+		qsize = pool._work_queue.qsize()
+		print(qsize)
+		remainderZip(args.z, qsize)
+		pool._threads.clear()
+		concurrent.futures.thread._threads_queues.clear()
+
+	removeDup(filePath)
+
+
+
+	# while (not zipQueue.empty()):
+	# 	if args.o == 'gay':
+	# 		filePath = 'gay.json'
+	# 		threadpool.append(pool.submit(dataScrape,zipQueue.get(), filePath, lock, *gay))
+	# 	elif args.o == 'les':
+	# 		filePath = 'les.json'
+	# 		threadpool.append(pool.submit(dataScrape,zipQueue.get(), filePath, lock, *les))
+	# 	elif args.o	== 'stw':
+	# 		filePath = 'stw.json'
+	# 		threadpool.append(pool.submit(dataScrape,zipQueue.get(), filePath, lock, *stw))
+	# 	elif args.o == 'stm':
+	# 		filePath = 'stm.json'
+	# 		threadpool.append(pool.submit(dataScrape,zipQueue.get(), filePath, lock, *stm))
+	#
+	# try:
+	# 	for fp in as_completed(threadpool):
+	# 		fp.result()
+	# except KeyboardInterrupt:
+	# 	print("KKKK")
+	# 	while not zipQueue.empty():
+	# 		print(zipQueue.get())
+	# 	pool._threads.clear()
+	# 	concurrent.futures.threadpoolad._threads_queues.clear()
 	# for i in thread:
 	# 	i.start()
 	# for i in thread:

@@ -9,6 +9,9 @@ class Dropbox_API:
             print('Uploading %s to %s' % (localpath, remotepath))
             with open(localpath,'rb') as f:
                 self.dbx.files_upload(f.read(), remotepath, mute=True)
+        except dropbox.exceptions.ApiError as apierr:
+            print(" - Failed to upload %s, file already exists" % localpath)
+            return True
         except Exception as err:
             print(" - Failed to upload %s\n%s" % (localpath, err))
             return False
